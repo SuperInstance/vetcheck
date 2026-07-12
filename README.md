@@ -221,6 +221,140 @@ This is part of [Working Animal Architecture](https://github.com/SuperInstance/A
 | [lineage-tracker](https://github.com/SuperInstance/lineage-tracker) | Lineage (health data enriches lineage records) |
 | [baton](https://github.com/SuperInstance/baton) | Generational handoff (health informs sunset decisions) |
 
+
+
+## Integration Patterns
+
+### With Breed Registry: Pre-Deployment Health Check
+
+```python
+from vetcheck import VetCheck
+from breed_registry import select_breed
+
+# Select the best model for a task
+recommended = select_breed("code_generation")
+print(f"Recommended: {recommended.recommended}")
+
+# Before deploying, verify it's healthy
+vet = VetCheck(model_id=recommended.recommended)
+cert = vet.health_certificate(validity_days=14)
+
+if cert.is_valid():
+    print(f"✓ {recommended.recommended} is certified healthy — deploy")
+else:
+    print(f"✗ {recommended.recommended} failed health check")
+    print(f"  Falling back to alternatives...")
+    for alt in recommended.alternatives:
+        alt_vet = VetCheck(model_id=alt.breed)
+        alt_cert = alt_vet.health_certificate()
+        if alt_cert.is_valid():
+            print(f"  ✓ {alt.breed} is healthy (score: {alt.score:.1f})")
+            break
+```
+
+### With Lineage Tracker: Regression Source Detection
+
+```python
+from vetcheck import VetCheck
+from lineage_tracker import LineageTracker
+
+# Model failed its physical exam
+vet = VetCheck(model_id="prod-model-v7")
+report = vet.physical_exam()
+
+if not report.passed:
+    # Check if this is a known weakness in the lineage
+    tracker = LineageTracker("lineage.json")
+    lineage = tracker.get_lineage("prod-model-v7")
+
+    print("Failed exam. Checking lineage for inherited weaknesses:")
+    for gen in lineage:
+        model = gen.model
+        failed_areas = [t.name for t in report.details if not t.passed]
+        for area in failed_areas:
+            trait_key = area.lower().replace(" ", "_")
+            if model.traits and trait_key in model.traits:
+                print(f"  Gen {gen.generation} {model.name}: {trait_key}={model.traits[trait_key]}")
+
+    # If the weakness is inherited, quarantine and recommend retraining
+    vet.quarantine(reason=f"Inherited regression: {failed_areas}")
+```
+
+### Continuous Monitoring with Scheduled Exams
+
+```python
+from vetcheck import VetCheck
+import schedule  # pip install schedule
+import time
+
+vet = VetCheck(model_id="prod-model-v7", baseline_dir="./baselines")
+
+# Daily weight check (lightweight — compares output distributions)
+schedule.every().day.at("06:00").do(lambda: vet.weight_check(window=500))
+
+# Weekly physical (full regression suite)
+schedule.every().monday.at("02:00").do(lambda: vet.physical_exam())
+
+# Monthly health certificate renewal
+schedule.every(30).days.do(lambda: vet.health_certificate(validity_days=7))
+
+# Auto-quarantine on critical failure
+def full_checkup():
+    report = vet.physical_exam()
+    if report.critical_failures > 0:
+        vet.quarantine(reason=f"Auto-quarantine: {report.critical_failures} critical failures")
+        # Alert the team
+        print(f"🚨 {vet.model_id} QUARANTINED — {report.critical_failures} critical failures")
+    return report
+
+schedule.every().day.at("12:00").do(full_checkup)
+
+# Run the scheduler
+while True:
+    schedule.run_pending()
+    time.sleep(60)
+```
+
+### Fleet Health Dashboard
+
+```python
+from vetcheck import VetCheck
+from breed_registry import BreedMatcher
+
+matcher = BreedMatcher()
+fleet = ["gpt-4", "claude-3", "llama-3", "glm", "qwen"]
+
+print("FLEET HEALTH REPORT")
+print("=" * 60)
+
+for model_id in fleet:
+    vet = VetCheck(model_id=model_id)
+    status = vet.health_status
+    quarantined = "🔒 QUARANTINED" if vet.is_quarantined else "🟢 ACTIVE"
+
+    # Quick weight check
+    drift = vet.weight_check(window=100)
+    drift_indicator = "📉" if drift.significant else "✓"
+
+    print(f"  {model_id:15s} {status.value:20s} {quarantined} drift:{drift_indicator}")
+
+    # Recommend breed-specific action
+    aptitude = matcher.assess(model_id, "reasoning")
+    if status.value == "quarantined":
+        alternatives = matcher.select("reasoning").alternatives[:2]
+        print(f"    → Failover to: {[a.breed for a in alternatives]}")
+```
+
+## Monitoring Philosophy
+
+The veterinary metaphor runs deeper than naming. In real animal husbandry:
+
+- **Preventative care is cheaper than emergency treatment.** A daily weight check catches drift before it becomes a regression. A weekly physical catches regressions before they reach users.
+- **Quarantine is not punishment.** It's protection — for the model (no traffic to handle while recovering) and for the system (no degraded output reaching users). The quarantine is lifted the moment a clean physical passes.
+- **Health certificates expire.** A model that was healthy last month might not be healthy today. Certificate expiry isn't bureaucracy — it's the acknowledgment that model health is dynamic, not static.
+- **Breed-specific screening matters.** A Thoroughbred (GPT-4) needs different tests than a Mustang (Llama-3). Custom test suites per breed catch breed-specific failure modes that generic tests miss.
+- **The vet's authority overrides the registry.** A model with the best breed score should not be in production if its health certificate has expired. The registry says what's best on paper; the vet says what's fit for duty right now.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

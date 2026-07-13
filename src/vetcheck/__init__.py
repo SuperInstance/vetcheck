@@ -119,6 +119,7 @@ class VetCheck:
         self,
         recent_outputs: list[dict[str, Any]] | None = None,
         window: int = 100,
+        threshold: float = 0.05,
     ) -> DriftReport:
         """
         Check for weight drift — output distribution shift over time.
@@ -129,7 +130,7 @@ class VetCheck:
         """
         recent = recent_outputs or self._baseline[-window:]
         baseline = self._baseline[:window] if len(self._baseline) > window else self._baseline
-        report = check_weight_drift(self.model_id, baseline, recent)
+        report = check_weight_drift(self.model_id, baseline, recent, threshold=threshold)
         self._last_drift = report
         return report
 

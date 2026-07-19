@@ -108,13 +108,22 @@ def check_weight_drift(
     b_std = pstdev(baseline_values) if len(baseline_values) > 1 and _HAS_STATS else 0.0001
     b_std = max(b_std, 1e-6)  # avoid division by zero
 
+    # Calculate mean difference
+    mean_diff = abs(r_mean - b_mean)
+
     # Cohen's d-style drift score
-    drift_score = abs(r_mean - b_mean) / b_std
+    drift_score = mean_diff / b_std
 
-    is_significant = drift_score > threshold
+    # Determine significance: use scaled threshold, but ensure minimum sensible threshold
+    # When variance is extremely low, don't be overly sensitive to tiny differences
+    # The effective threshold is the max of scaled_threshold and a small absolute value
+    min_abs_threshold = 0.01  # Minimum 1% absolute difference for significance
+    effective_threshold = max(threshold * b_std, min_abs_threshold)
+    is_significant = mean_diff > effective_threshold
 
-    # Trend determination
-    if abs(drift_score) < threshold * 0.5:
+    # Trend determination: use effective threshold for stability check
+    # A trend is "stable" if the mean difference is small
+    if mean_diff < effective_threshold * 0.5:
         trend = "stable"
     elif r_mean > b_mean:
         trend = "increasing"

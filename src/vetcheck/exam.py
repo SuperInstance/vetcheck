@@ -34,8 +34,16 @@ class ExamResult:
 
     @property
     def passed(self) -> bool:
-        """Overall pass — no critical vital signs failed."""
-        return all(v.passed for v in self.vitals if v.critical)
+        """Overall pass — no critical vital signs failed.
+
+        If there are no critical vitals, requires all vitals to pass
+        to avoid a vacuous pass on an empty exam.
+        """
+        critical_vitals = [v for v in self.vitals if v.critical]
+        if critical_vitals:
+            return all(v.passed for v in critical_vitals)
+        # No critical vitals: require all vitals to pass
+        return all(v.passed for v in self.vitals)
 
     @property
     def all_passed(self) -> bool:

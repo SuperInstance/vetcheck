@@ -264,3 +264,86 @@ class TestVetCheck:
         recent = [{"score": 0.95} for _ in range(30)]
         vet.weight_check(recent_outputs=recent, threshold=0.5)
         assert vet.status == HealthStatus.UNDER_OBSERVATION
+
+
+# ─── Regression Tests for Bugs Found in v0.1.0 Audit ─────────────────────
+
+
+class TestDriftLowVariance:
+    """Regression tests for drift calculation bug with low variance."""
+
+    def test_tiny_mean_difference_with_zero_variance(self):
+        """
+        Regression: Tiny mean differences with zero variance should not be significant.
+        Bug: A 0.001 difference with near-zero std was showing as significant (drift_score ~1000).
+        Fix: Use minimum absolute threshold to prevent over-sensitivity.
+        """
+        # Baseline: constant values (std = 0)
+        baseline = [{"score": 0.5} for _ in range(10)]
+        # Recent: slightly higher constant values (std = 0)
+        recent = [{"score": 0.501} for _ in range(10)]
+
+        report = check_weight_drift("model", baseline, recent, threshold=0.05)
+
+        # A 0.001 difference should not be significant
+        assert not report.is_significant
+        assert report.trend == "stable"
+
+    def test_significant_drift_with_variance(self):
+        """Ensure real drift with proper variance is still detected."""
+        baseline = [{"score": 0.5 + i * 0.01} for i in range(20)]
+        recent = [{"score": 0.8 + i * 0.01} for i in range(20)]
+
+        report = check_weight_drift("model", baseline, recent, threshold=0.5)
+
+        # This is a real drift (0.3 mean difference) with variance
+        assert report.is_significant
+        assert report.trend == "increasing"
+
+
+class TestExamEmptyCriticalVitals:
+    """Regression tests for empty critical vitals bug."""
+
+    def test_empty_critical_vitals_all_fail(self):
+        """
+        Regression: Exam with only non-critical tests that all fail should not pass.
+        Bug: When no critical tests existed, passed returned True (vacuous truth).
+        Fix: Require all tests to pass when there are no critical tests.
+        """
+        suite = [
+            {"name": "vision", "description": "Context window", "critical": False, "check": lambda: False},
+            {"name": "blood_pressure", "description": "Load handling", "critical": False, "check": lambda: False},
+        ]
+
+        result = run_physical_exam("test-model", suite)
+
+        # After fix: should not pass when all tests fail (even if non-critical)
+        assert not result.passed
+        assert result.warnings == 2
+        assert result.critical_failures == 0
+
+    def test_empty_critical_vitals_mixed_results(self):
+        """Mixed results with no critical tests: should fail."""
+        suite = [
+            {"name": "vision", "description": "Context window", "critical": False, "check": lambda: True},
+            {"name": "blood_pressure", "description": "Load handling", "critical": False, "check": lambda: False},
+        ]
+
+        result = run_physical_exam("test-model", suite)
+
+        # After fix: should not pass when any test fails
+        assert not result.passed
+        assert result.warnings == 1
+
+    def test_empty_critical_vitals_all_pass(self):
+        """All pass with no critical tests: should pass."""
+        suite = [
+            {"name": "vision", "description": "Context window", "critical": False, "check": lambda: True},
+            {"name": "blood_pressure", "description": "Load handling", "critical": False, "check": lambda: True},
+        ]
+
+        result = run_physical_exam("test-model", suite)
+
+        # After fix: should pass when all tests pass
+        assert result.passed
+        assert result.all_passed

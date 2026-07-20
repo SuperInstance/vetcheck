@@ -51,7 +51,7 @@ class HealthCertificate:
     def is_valid(self, now: float | None = None) -> bool:
         """Check if this certificate is still within its expiry."""
         now = now or time.time()
-        return now < self.expires_at
+        return now <= self.expires_at
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,7 +128,9 @@ class VetCheck:
         outputs against the baseline to detect statistically
         significant drift.
         """
-        recent = recent_outputs or self._baseline[-window:]
+        if recent_outputs is None:
+            raise ValueError("recent_outputs is required — cannot compare baseline against itself")
+        recent = recent_outputs
         baseline = self._baseline[:window] if len(self._baseline) > window else self._baseline
         report = check_weight_drift(self.model_id, baseline, recent, threshold=threshold)
         self._last_drift = report
@@ -210,7 +212,7 @@ class VetCheck:
             last_exam_passed=last_passed,
             weight_stable=weight_stable,
             quarantine_active=quarantined,
-            notes="Issued by Vetcheck" if last_passed and not quarantined else "Force-issued",
+            notes="Issued by Vetcheck" if last_passed and not quarantined and not (self._last_drift and self._last_drift.is_significant) else "Force-issued",
         )
 
 

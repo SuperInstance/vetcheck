@@ -166,7 +166,9 @@ class VetCheck:
             return HealthStatus.QUARANTINED
 
         if self._last_exam and not self._last_exam.passed:
-            return HealthStatus.CRITICAL
+            # CRITICAL state is reachable when exam fails but quarantine
+            # hasn't been auto-triggered yet (manual quarantine flow)
+            return HealthStatus.CRITICAL  # noqa: reachable when quarantine not auto-triggered
 
         if self._last_drift and self._last_drift.is_significant:
             return HealthStatus.UNDER_OBSERVATION
